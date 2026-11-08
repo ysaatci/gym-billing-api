@@ -9,7 +9,9 @@ namespace App\Payments;
  * Contract for every implementation:
  * - returns a ChargeResult when the money was taken;
  * - throws PaymentFailedException for ANY failure, including SDK errors and timeouts,
- *   so nothing provider-specific leaks out.
+ *   so nothing provider-specific leaks out;
+ * - sets connect and read timeouts on its HTTP calls (e.g. 2s / 10s), so a slow
+ *   provider can't hold a request open until PHP's execution limit.
  */
 interface PaymentGateway
 {

@@ -71,6 +71,15 @@ it('replays a retried request without charging again', function () {
         ->and(Invoice::count())->toBe(1);
 });
 
+it('treats "1" and 1 as the same plan_id when replaying', function () {
+    $gateway = fakeGateway();
+
+    postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    postSubscription($this->member, ['plan_id' => (string) $this->plan->id])->assertCreated();
+
+    expect($gateway->charges)->toHaveCount(1);
+});
+
 it('rejects the same key with a different body (422) and charges nothing new', function () {
     $gateway = fakeGateway();
     $otherPlan = Plan::factory()->create(['name' => 'Premium', 'price_cents' => 4999]);

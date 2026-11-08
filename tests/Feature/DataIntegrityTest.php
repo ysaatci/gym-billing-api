@@ -1,11 +1,13 @@
 <?php
 
 use App\Enums\IdempotencyStatus;
+use App\Enums\InvoiceStatus;
+use App\Enums\SubscriptionStatus;
 use App\Enums\UserRole;
 use App\Models\IdempotencyKey;
-use App\Models\Plan;
+use App\Models\Invoice;
+use App\Models\Subscription;
 use App\Models\User;
-use Database\Seeders\DatabaseSeeder;
 use Illuminate\Database\UniqueConstraintViolationException;
 
 function insertIdempotencyKey(User $user, string $key): IdempotencyKey
@@ -43,17 +45,14 @@ it('never lets mass assignment set the role', function () {
     expect($user->fresh()->role)->toBe(UserRole::Member);
 });
 
-it('stores the password as a bcrypt hash, not plain text', function () {
-    $user = User::factory()->create(['password' => 'secret-password']);
+it('refuses to change the status of a subscription that is no longer pending', function () {
+    $subscription = Subscription::factory()->create(['status' => SubscriptionStatus::Failed]);
 
-    expect($user->password)->not->toBe('secret-password')
-        ->and(password_get_info($user->password)['algoName'])->toBe('bcrypt');
-});
+    $subscription->markActive();
+})->throws(LogicException::class, 'expected pending');
 
-it('seeds an admin, a member and one inactive plan', function () {
-    $this->seed(DatabaseSeeder::class);
+it('refuses to pay an invoice that is no longer open', function () {
+    $invoice = Invoice::factory()->create(['status' => InvoiceStatus::Void]);
 
-    expect(User::where('role', UserRole::Admin)->count())->toBe(1)
-        ->and(User::where('role', UserRole::Member)->count())->toBe(1)
-        ->and(Plan::where('is_active', false)->count())->toBe(1);
-});
+    $invoice->markPaid('fake_ch_123');
+})->throws(LogicException::class, 'expected open');

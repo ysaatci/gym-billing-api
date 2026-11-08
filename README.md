@@ -43,7 +43,7 @@ Plans and an admin user are seeded; there is no plan management API.
 ```bash
 composer setup     # install, .env, SQLite, migrate + seed (admin@ / member@example.com, password "password")
 composer dev       # http://localhost:8000
-vendor/bin/pest    # 36 tests
+vendor/bin/pest    # 37 tests
 ```
 
 Send the same `POST /api/subscriptions` twice with the same `Idempotency-Key`: same 201 and body, charged once. `FAKE_GATEWAY_DECLINE=true` in `.env` shows the 402 path. Payment events are in `storage/logs/billing.log`.
@@ -57,7 +57,7 @@ CI runs Pint, Pest and `composer audit` on every push ([workflow](.github/workfl
 - **A retry gets the same answer, rebuilt from the stored outcome.** A decline stays a decline (402), and the gateway is not called again.
 - **The provider gets its own key, `invoice-{id}`.** Client keys are only unique per user.
 - **Money is integer cents + currency**, and the price is copied onto the invoice.
-- **The payment provider sits behind an interface** ([`PaymentGateway`](app/Payments/PaymentGateway.php#L14), bound in [`AppServiceProvider`](app/Providers/AppServiceProvider.php#L14)), so a real provider is one new class.
+- **The payment provider sits behind an interface** ([`PaymentGateway`](app/Payments/PaymentGateway.php#L16), bound in [`AppServiceProvider`](app/Providers/AppServiceProvider.php#L14)), so a real provider is one new class.
 
 ## Review checklist → code
 
@@ -83,4 +83,4 @@ CI runs Pint, Pest and `composer audit` on every push ([workflow](.github/workfl
 Rough spots I'd clean up: `recordPayment`/`recordDecline` are near-duplicates; `IdempotencyStore` should become middleware once a second endpoint needs it; the request fingerprint lists fields by hand.
 
 ---
-Built as a timeboxed exercise with AI assistance (see [`CLAUDE.md`](CLAUDE.md)). I've read and can explain every line.
+Built as a timeboxed exercise with AI assistance (Claude Code), in small reviewed steps. I've read and can explain every line.

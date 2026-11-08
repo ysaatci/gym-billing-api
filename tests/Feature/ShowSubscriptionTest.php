@@ -5,7 +5,7 @@ use App\Models\Subscription;
 use App\Models\User;
 
 beforeEach(function () {
-    $this->owner = User::factory()->create();
+    $this->owner = User::factory()->create(['email' => 'owner@example.com']);
     $this->subscription = Subscription::factory()->for($this->owner)->create();
     Invoice::factory()->for($this->subscription)->create();
 });
@@ -17,7 +17,7 @@ it('shows the subscription with its invoice to the owner', function () {
         ->assertJsonPath('data.id', $this->subscription->id)
         ->assertJsonPath('data.invoice.amount_cents', 2999)
         ->assertJsonPath('data.invoice.currency', 'EUR')
-        ->assertJsonMissingPath('data.user.email');
+        ->assertDontSee('owner@example.com'); // the email appears nowhere in the response
 });
 
 it('shows any subscription to an admin', function () {
