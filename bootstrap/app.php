@@ -1,5 +1,8 @@
 <?php
 
+use App\Exceptions\IdempotencyKeyInUseException;
+use App\Exceptions\IdempotencyKeyMismatchException;
+use App\Payments\PaymentFailedException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,4 +27,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // Domain exceptions -> HTTP. The exceptions themselves know nothing about HTTP;
+        // this is the one place that maps them to status codes.
+        $exceptions->render(fn (PaymentFailedException $e) => response()->json([
+            'message' => $e->getMessage(),
+            'reason' => $e->reason,
+        ], 402));
+
+        $exceptions->render(fn (IdempotencyKeyInUseException $e) => response()->json([
+            'message' => $e->getMessage(),
+        ], 409));
+
+        $exceptions->render(fn (IdempotencyKeyMismatchException $e) => response()->json([
+            'message' => $e->getMessage(),
+        ], 422));
     })->create();

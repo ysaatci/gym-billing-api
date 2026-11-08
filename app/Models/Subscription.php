@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use LogicException;
 
 #[Fillable(['user_id', 'plan_id', 'status', 'started_at'])]
 class Subscription extends Model
@@ -22,6 +23,30 @@ class Subscription extends Model
             'status' => SubscriptionStatus::class,
             'started_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Status changes go through these methods only, so an invalid transition
+     * (e.g. failed -> active) is a loud error instead of silently corrupt billing data.
+     * An enum plus two guarded methods is enough for three states (no State pattern).
+     */
+    public function markActive(): void
+    {
+        $this->assertPending();
+        $this->update(['status' => SubscriptionStatus::Active, 'started_at' => now()]);
+    }
+
+    public function markFailed(): void
+    {
+        $this->assertPending();
+        $this->update(['status' => SubscriptionStatus::Failed]);
+    }
+
+    private function assertPending(): void
+    {
+        if ($this->status !== SubscriptionStatus::Pending) {
+            throw new LogicException("Subscription {$this->id} is {$this->status->value}, expected pending.");
+        }
     }
 
     /** @return BelongsTo<User, $this> */

@@ -13,6 +13,9 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 // Authenticated: auth:sanctum reads "Authorization: Bearer <token>", finds the token row,
 // and sets $request->user(). Missing or invalid token -> 401 before any controller runs.
 Route::middleware('auth:sanctum')->group(function () {
+    // THE MAIN REQUEST: any authenticated user; Idempotency-Key header checked in StoreSubscriptionRequest.
+    Route::post('/subscriptions', [SubscriptionController::class, 'store']);
+
     // Owner or admin: checked by SubscriptionPolicy inside the controller.
     Route::get('/subscriptions/{subscription}', [SubscriptionController::class, 'show']);
 });

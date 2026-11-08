@@ -21,7 +21,7 @@ Constraints:
 - **Correctness and security are not negotiable:** no double charges, no string-built SQL, no plaintext passwords, no personal data in logs, no floating-point money.
 - **Missing features and polish are acceptable inside the timebox**, as long as each one is documented in the README with what's missing, why it was left out, and what I'd do next.
 - Mark each open item at the place in the code where it would go, with a short comment pointing to "Known limitations". Keep these few (5-8).
-- Keep an honest "what I'd clean up" list too, not only missing features (e.g. the phase B method in the service could be split further; `IdempotencyStore` would be wrapped in middleware once a second endpoint needs it (D12); the request hash ignores encoding edge cases).
+- Keep an honest "what I'd clean up" list too, not only missing features (e.g. `recordPayment()` and `recordDecline()` in the service are near-duplicates, kept separate for readability; `IdempotencyStore` would be wrapped in middleware once a second endpoint needs it (D12); the request hash ignores encoding edge cases).
 
 ## Stack
 Current Laravel release, PHP 8.3+, Sanctum for API tokens, Pest for tests, SQLite for local dev and CI.
@@ -40,18 +40,18 @@ Plans and an admin user are **seeded**, not managed via the API (no plan CRUD, n
 - `users`: id, name, email (unique), password (bcrypt hash), role (`member` | `admin`, PHP enum, default `member`)
 - `plans`: id, name, price_cents (int), currency (char 3), billing_period (`monthly`), is_active
 - `subscriptions`: id, user_id, plan_id, status (`pending` | `active` | `failed`), started_at, timestamps
-- `invoices`: id, subscription_id, amount_cents, currency (snapshot of the plan price), status (`open` | `paid` | `void`), gateway_reference (nullable), timestamps
-- `idempotency_keys`: id, user_id, key, request_hash, status (`processing` | `completed`), response_code (nullable), response_body (json, nullable), subscription_id (nullable), timestamps. **unique(user_id, key)**
+- `invoices`: id, subscription_id, amount_cents, currency (snapshot of the plan price), status (`open` | `paid` | `void`), gateway_reference (nullable), failure_reason (nullable), timestamps
+- `idempotency_keys`: id, user_id, key, request_hash, status (`processing` | `completed`), subscription_id, timestamps. **unique(user_id, key)**
 
 ## Main flow: `POST /api/subscriptions`
 1. `routes/api.php` -> middleware: `auth:sanctum`, `AssignRequestId`
-2. `StoreSubscriptionRequest` (FormRequest): `plan_id` exists and is active; `Idempotency-Key` header present, max 255 chars
-3. `SubscriptionController::store` -> calls `SubscriptionService::subscribe(user, plan, key, requestHash)`. The controller stays thin.
-4. Service, **phase A** (`DB::transaction`): claim the idempotency key (`processing`), create the subscription (`pending`) and the invoice (`open`, price snapshot). Commit.
-   - Unique violation on the key -> load the existing row: `completed` -> replay stored response; `processing` -> 409 Conflict; different `request_hash` -> 422.
-5. **Gateway call, outside any transaction**: `PaymentGateway::charge(amountCents, currency, idempotencyKey): ChargeResult` inside try/catch. Fake implementation injected via the container. The gateway gets plain values, not the Eloquent `Invoice`, so it doesn't depend on our database models.
-6. Service, **phase B** (`DB::transaction`): success -> subscription `active`, invoice `paid` + gateway reference. Decline -> subscription `failed`, invoice `void`. Either way store response code and body on the key row and mark it `completed`.
-7. Success -> `SubscriptionResource` (201, includes the invoice). Decline -> `PaymentFailedException` -> exception handler renders clean JSON 402.
+2. `StoreSubscriptionRequest` (FormRequest): `plan_id` exists and is active; `Idempotency-Key` header present, max 255 chars. Also provides `plan()`, `idempotencyKey()` and `fingerprint()` (SHA-256 of the canonical body).
+3. `SubscriptionController::store` -> calls `SubscriptionService::subscribe(user, plan, key, fingerprint)`. The controller stays thin.
+4. Service, **phase A** (`DB::transaction`): create the subscription (`pending`) and the invoice (`open`, price snapshot), then claim the idempotency key (`processing`, pointing at the subscription). Commit.
+   - Key already claimed -> the insert hits the unique constraint, phase A rolls back, and `IdempotencyStore::findReplayable` decides: different `request_hash` -> 422; `processing` -> 409; `completed` -> replay (active -> same 201, failed -> same 402).
+5. **Gateway call, outside any transaction**: `PaymentGateway::charge(amountCents, currency, "invoice-{id}"): ChargeResult` inside try/catch. Fake implementation injected via the container. The gateway gets plain values, not the Eloquent `Invoice`, so it doesn't depend on our database models.
+6. Service, **phase B** (`DB::transaction`): success -> subscription `active`, invoice `paid` + gateway reference. Decline -> subscription `failed`, invoice `void` + failure reason. Either way the key is marked `completed`.
+7. Success -> `SubscriptionResource` (201, includes the invoice). Decline -> `PaymentFailedException` -> `bootstrap/app.php` renders clean JSON 402 with a reason code.
 
 ## Design decisions and trade-offs (mirrored in the README)
 
@@ -60,10 +60,10 @@ Why: holding a transaction open during a network call keeps locks and a connecti
 Cost: longer code, and a window where the charge succeeded but phase B hasn't run (crash). That window is the main known limitation (see D6).
 Rejected: one big transaction. Simpler to read, but wrong for payments.
 
-**D2. Separate `idempotency_keys` table, not a column on `subscriptions`.**
-Why: it can store the response for *any* outcome (including declines, which don't produce an active subscription) and replay it exactly. It also holds the request hash.
-Cost: one more table and model.
-Rejected: unique column on subscriptions. Fine for successes, but can't replay a 402.
+**D2. Separate `idempotency_keys` table that stores the outcome (which subscription), not the raw HTTP response.**
+Why: a separate table holds the request hash and the in-flight status, and works for declines too. Storing a pointer to the subscription instead of the response body keeps HTTP out of the service: the replay rebuilds the same response (active -> 201 + resource, failed -> 402 + stored reason).
+Cost: if the subscription changes later (e.g. a future cancel endpoint), a replay shows its current state, not the original bytes. Stripe stores the raw body; I'd do that once the API has more than one outcome per key.
+Rejected: a unique column on subscriptions (no place for the hash or in-flight status), and storing raw response bodies (needs the service or a middleware to know the HTTP response).
 
 **D3. Key scoped per user, `unique(user_id, key)`.**
 Why: one user's key can't collide with, or replay, another user's response.
@@ -80,7 +80,7 @@ Rejected: `Cache::lock` (needs Redis, and the lock isn't atomic with the DB writ
 - Decline (`PaymentFailedException`): a **final** result. Stored, so a retry with the same key gets the same 402 and is never charged again.
 - Unexpected gateway error / timeout: treated like a failure and stored in this version. In reality the outcome is *unknown* (the charge may have gone through), so the subscription should stay `pending` and be resolved by a gateway webhook or a reconciliation job. Passing our idempotency key on to the gateway (D7) is what makes a later retry safe. Documented as a limitation.
 
-**D7. Idempotency key is passed through to the gateway.** Real providers (Stripe, Adyen) accept one. It protects against double charges even if our own bookkeeping fails.
+**D7. The gateway gets its own idempotency key: `invoice-{id}`.** Real providers (Stripe, Adyen) accept one, which protects against double charges even if our own bookkeeping fails. Not the client's key: that one is only unique per user, so two users sending "abc" would collide at the provider. One key per invoice stays stable if a reconciliation job ever retries the charge.
 
 **D8. Money as integer cents plus currency; price snapshot on the invoice.** Floats can't represent 0.10 exactly. Snapshotting means a later plan price change doesn't rewrite old invoices.
 
@@ -94,7 +94,11 @@ Rejected: `Cache::lock` (needs Redis, and the lock isn't atomic with the DB writ
 
 **D13. Logging: dedicated `billing` channel, request ID via `Log::withContext()`, Monolog processor that redacts `password`, `token`, `authorization`, `email`, `card*`.** Log user/subscription/invoice IDs, never emails or card data. Redaction is a safety net; the first rule is to not pass personal data to the logger at all.
 
-**D14. Replays return the original status code and body, plus `Idempotent-Replayed: true`.** Clients don't need to tell the cases apart, but debugging is easier.
+**D14. Replays return the same status code and body as the first request, with no marker.** Clients don't need to tell the cases apart. An `Idempotent-Replayed: true` header would help debugging; left out to keep the service free of HTTP concerns (listed under "what I'd change").
+
+**D15. Status changes only through guarded model methods** (`markActive()`, `markFailed()`, `markPaid()`, `markVoid()`). An invalid transition throws `LogicException` (500) instead of silently writing bad billing data.
+
+**D16. Domain exceptions don't know HTTP.** `PaymentFailedException`, `IdempotencyKeyInUseException` and `IdempotencyKeyMismatchException` are plain exceptions; `bootstrap/app.php` is the one place that maps them to 402 / 409 / 422. The gateway contract requires every implementation to translate SDK errors and timeouts into `PaymentFailedException`, so nothing provider-specific leaks into the service.
 
 ## Design patterns and SOLID
 Rule: each pattern must earn its place. In a small codebase, a pattern that can't be justified is a cost.
@@ -103,7 +107,7 @@ Used:
 - **Strategy + dependency injection: `PaymentGateway` interface.** `FakePaymentGateway` now, `StripeGateway`/`AdyenGateway` later; swapped with one binding in `AppServiceProvider`. The service never knows which one it has.
 - **Adapter (future):** a real gateway class adapts the provider's SDK to our interface. Not built.
 - **Service layer:** `SubscriptionService` orchestrates the use case; controllers stay thin.
-- **DTO / value object:** `ChargeResult` (PHP `readonly` class: `reference`, `status`) returned by the gateway, so callers never handle raw SDK arrays.
+- **DTO / value object:** `ChargeResult` (PHP `readonly` class holding the provider's `reference`) returned by the gateway, so callers never handle raw SDK arrays. Failure is an exception, not a status field, so a caller can't forget to check it.
 - **Laravel built-ins as patterns:** FormRequest (validation), Policy (authorization), API Resource (output shaping), service container (IoC).
 
 Considered and rejected:
@@ -131,7 +135,7 @@ SOLID in this codebase:
 9. **General practice:** Pest feature tests (success, validation failure, unauthenticated 401, forbidden 403, duplicate key replay with **gateway called exactly once**, same key different body 422, gateway decline 402, no `trace` in error JSON), a unit test for log redaction, GitHub Actions workflow, Dependabot (composer + github-actions), `composer audit` in CI, README section on review and deploy.
 
 ## Known limitations (documented in README)
-No rate limiting on login, no token expiry/rotation, fake gateway, no webhooks or reconciliation (D6), thin concurrency test on SQLite (D4), no plan management API or plan listing (seeded), no recurring renewals or dunning, no "one active subscription per plan" rule. The payment call should move to a queued job with retries, and state changes should publish events via an outbox. README says what I'd change and why.
+No rate limiting on login, no token expiry/rotation, fake gateway, no webhooks or reconciliation (D6), thin concurrency test on SQLite (D4), no plan management API or plan listing (seeded), no recurring renewals or dunning, no "one active subscription per plan" rule. A crash between the charge and phase B leaves the key `processing` (every retry gets 409) and the subscription `pending`, until a webhook or reconciliation job settles it; stale `processing` keys also need a timeout. Idempotency keys are never cleaned up (would expire after ~24h). The payment call should move to a queued job with retries, and state changes should publish events via an outbox. README says what I'd change and why.
 
 ## README contents
 - How to run and test
@@ -139,7 +143,7 @@ No rate limiting on login, no token expiry/rotation, fake gateway, no webhooks o
 - Entry point: `routes/api.php` and `SubscriptionController::store`
 - Exit point: `SubscriptionResource`, and the exception handler for errors
 - Step-by-step trace of the main request with file:line for each step
-- Design decisions D1-D14 (short)
+- Design decisions D1-D16 (short)
 - Checklist items mapped to files and lines
 - Known limitations / what I'd change
 - How I'd review and deploy this

@@ -35,4 +35,10 @@ return [
         ],
     ],
 
+    // Local stand-in for a payment provider (App\Payments\FakePaymentGateway).
+    // A real provider's API key would live here too, read from the environment, never hard-coded.
+    'fake_gateway' => [
+        'decline' => (bool) env('FAKE_GATEWAY_DECLINE', false),
+    ],
+
 ];

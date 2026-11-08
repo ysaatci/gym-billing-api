@@ -17,6 +17,7 @@ return new class extends Migration
             $table->char('currency', 3);
             $table->string('status'); // App\Enums\InvoiceStatus
             $table->string('gateway_reference')->nullable(); // the gateway's charge ID, once paid
+            $table->string('failure_reason')->nullable(); // gateway reason code when declined, e.g. card_declined
             $table->timestamps();
         });
     }
