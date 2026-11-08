@@ -66,7 +66,7 @@ curl -i -X POST localhost:8000/api/subscriptions \
 ## Test it
 
 ```bash
-vendor/bin/pest           # 38 tests, in-memory SQLite
+vendor/bin/pest           # 36 tests, in-memory SQLite
 vendor/bin/pint --test    # code style
 ```
 
