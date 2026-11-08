@@ -24,7 +24,7 @@ Constraints:
 - Keep an honest "what I'd clean up" list too, not only missing features (e.g. `recordPayment()` and `recordDecline()` in the service are near-duplicates, kept separate for readability; `IdempotencyStore` would be wrapped in middleware once a second endpoint needs it (D12); the request hash ignores encoding edge cases).
 
 ## Stack
-Current Laravel release, PHP 8.3+, Sanctum for API tokens, Pest for tests, SQLite for local dev and CI.
+Laravel 13, PHP 8.4+ (the locked Symfony 8 components require it), Sanctum for API tokens, Pest for tests, Pint for code style, SQLite for local dev and CI.
 
 ## Endpoints
 | Endpoint | Access | Purpose |
