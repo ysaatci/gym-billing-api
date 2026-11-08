@@ -23,6 +23,15 @@ class User extends Authenticatable
     // in personal_access_tokens and returns the plain token to the client once (D10).
     use HasApiTokens, HasFactory;
 
+    /**
+     * Model-side default, matching the column default. Needed because after an INSERT
+     * Eloquent doesn't read DB defaults back, so without this a freshly created user
+     * would have role = null in memory until reloaded.
+     */
+    protected $attributes = [
+        'role' => 'member',
+    ];
+
     protected function casts(): array
     {
         return [

@@ -13,9 +13,14 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // API-only app, there is no login page: an unauthenticated request gets a 401,
+        // never a redirect. Without this, auth:sanctum tries to redirect to route('login')
+        // when the client doesn't send "Accept: application/json", and fails with a 500.
+        $middleware->redirectGuestsTo(fn (Request $request) => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // API routes always get JSON errors (401, 403, 404, 422 ...) instead of HTML pages
+        // or redirects to a login page, even if the client forgot "Accept: application/json".
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );

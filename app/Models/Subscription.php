@@ -3,7 +3,9 @@
 namespace App\Models;
 
 use App\Enums\SubscriptionStatus;
+use Database\Factories\SubscriptionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -11,6 +13,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Fillable(['user_id', 'plan_id', 'status', 'started_at'])]
 class Subscription extends Model
 {
+    /** @use HasFactory<SubscriptionFactory> */
+    use HasFactory;
+
     protected function casts(): array
     {
         return [
