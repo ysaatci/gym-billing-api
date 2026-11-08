@@ -33,7 +33,7 @@ class AuthController extends Controller
         // Same answer for "no such user" and "wrong password", so the response doesn't
         // reveal which emails are registered.
         // Not built: the timing still differs (no hash check for unknown emails), and
-        // there's no rate limiting. See README "Known limitations".
+        // there's no rate limiting yet.
         if (! $user || ! Hash::check($request->validated('password'), $user->password)) {
             Log::warning('auth.login_failed', ['user_id' => $user?->id]); // never the email or password
 

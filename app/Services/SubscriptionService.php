@@ -84,7 +84,7 @@ final class SubscriptionService
     /**
      * Not handled: if the process dies between the charge and phase B, the key stays
      * "processing" and the subscription "pending" until a webhook or reconciliation job
-     * settles it. See README "Known limitations".
+     * settles it (not built yet).
      */
     private function payFirstInvoice(Subscription $subscription, IdempotencyKey $claim): void
     {
