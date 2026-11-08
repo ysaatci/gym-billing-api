@@ -10,11 +10,11 @@ return new class extends Migration
     {
         Schema::create('subscriptions', function (Blueprint $table) {
             $table->id();
-            // No cascading deletes on billing data: deleting a user must not silently erase payment history.
+            // No cascading deletes on billing data: deleting a user must not erase payment history.
             $table->foreignId('user_id')->constrained();
             $table->foreignId('plan_id')->constrained();
-            $table->string('status'); // App\Enums\SubscriptionStatus
-            $table->timestamp('started_at')->nullable(); // set when payment succeeds
+            $table->string('status');
+            $table->timestamp('started_at')->nullable();
             $table->timestamps();
         });
     }

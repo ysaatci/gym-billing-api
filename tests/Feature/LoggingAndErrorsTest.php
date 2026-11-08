@@ -23,7 +23,7 @@ function captureLogs(?string $channel = null): TestHandler
 }
 
 /** One log record flattened to text, to search for things that must never appear. */
-function logged(TestHandler $handler): string
+function loggedText(TestHandler $handler): string
 {
     return collect($handler->getRecords())
         ->map(fn (LogRecord $r) => json_encode($r->toArray()))
@@ -68,8 +68,8 @@ describe('billing log', function () {
             'subscription_id' => $response->json('data.id'),
             'amount_cents' => 2999,
         ])
-            ->and(logged($logs))->toContain($response->headers->get('X-Request-Id'))
-            ->and(logged($logs))->not->toContain('ada@example.com');
+            ->and(loggedText($logs))->toContain($response->headers->get('X-Request-Id'))
+            ->and(loggedText($logs))->not->toContain('ada@example.com');
     });
 
     it('logs a decline as a warning with the reason code', function () {
@@ -92,8 +92,8 @@ it('logs a failed login without the email or the password tried', function () {
         ->assertUnauthorized();
 
     expect($logs->hasWarningThatContains('auth.login_failed'))->toBeTrue()
-        ->and(logged($logs))->not->toContain('ada@example.com')
-        ->and(logged($logs))->not->toContain('wrong-password');
+        ->and(loggedText($logs))->not->toContain('ada@example.com')
+        ->and(loggedText($logs))->not->toContain('wrong-password');
 });
 
 it('answers an unexpected failure with a bare 500, logs the details, and leaves the key in processing', function () {
@@ -116,10 +116,10 @@ it('answers an unexpected failure with a bare 500, logs the details, and leaves 
     $response->assertStatus(500)->assertExactJson(['message' => 'Server Error']);
 
     // ...but the log has the exception and the request ID to find it.
-    expect(logged($logs))->toContain('Connection reset by peer')
-        ->and(logged($logs))->toContain($response->headers->get('X-Request-Id'));
+    expect(loggedText($logs))->toContain('Connection reset by peer')
+        ->and(loggedText($logs))->toContain($response->headers->get('X-Request-Id'));
 
-    // Known limitation (D6): the outcome is unknown, so the key stays "processing" and a
+    // Known limitation: the outcome is unknown, so the key stays "processing" and a
     // retry gets 409 until a webhook or reconciliation job settles it.
     $this->actingAs($this->member)
         ->postJson('/api/subscriptions', ['plan_id' => $this->plan->id], ['Idempotency-Key' => 'key-1'])

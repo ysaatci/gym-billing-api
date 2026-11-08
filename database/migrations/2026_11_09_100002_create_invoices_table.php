@@ -11,13 +11,11 @@ return new class extends Migration
         Schema::create('invoices', function (Blueprint $table) {
             $table->id();
             $table->foreignId('subscription_id')->constrained();
-            // Snapshot of the plan price at purchase time, so a later price change
-            // doesn't rewrite what the customer was actually charged (D8).
-            $table->unsignedInteger('amount_cents');
+            $table->unsignedInteger('amount_cents'); // copied from the plan at purchase time
             $table->char('currency', 3);
-            $table->string('status'); // App\Enums\InvoiceStatus
-            $table->string('gateway_reference')->nullable(); // the gateway's charge ID, once paid
-            $table->string('failure_reason')->nullable(); // gateway reason code when declined, e.g. card_declined
+            $table->string('status');
+            $table->string('gateway_reference')->nullable();
+            $table->string('failure_reason')->nullable();
             $table->timestamps();
         });
     }

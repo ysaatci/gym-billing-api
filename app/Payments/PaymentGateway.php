@@ -3,23 +3,18 @@
 namespace App\Payments;
 
 /**
- * Strategy interface for "something that can charge money". SubscriptionService depends
- * only on this, and the container decides which implementation it gets (AppServiceProvider).
- * Today: FakePaymentGateway. Later: a StripeGateway / AdyenGateway that adapts the
- * provider's SDK to this contract, with no change to the service (open/closed).
+ * Anything that can charge money. The service depends only on this interface;
+ * AppServiceProvider decides which implementation it gets.
  *
- * Contract every implementation must keep (so they are interchangeable):
+ * Contract for every implementation:
  * - returns a ChargeResult when the money was taken;
- * - throws PaymentFailedException for ANY failure: a decline, but also SDK errors and
- *   timeouts, translated at this boundary. Nothing provider-specific leaks out.
+ * - throws PaymentFailedException for ANY failure, including SDK errors and timeouts,
+ *   so nothing provider-specific leaks out.
  */
 interface PaymentGateway
 {
     /**
-     * @param  int  $amountCents  amount in minor units (D8)
-     * @param  string  $currency  ISO 4217 code
-     * @param  string  $idempotencyKey  forwarded to the provider, so a repeated call for
-     *                                  the same invoice can never be charged twice (D7)
+     * @param  string  $idempotencyKey  forwarded to the provider, so the same charge is never made twice
      *
      * @throws PaymentFailedException
      */

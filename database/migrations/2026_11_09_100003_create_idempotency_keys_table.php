@@ -12,16 +12,13 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained();
             $table->string('key');
-            // SHA-256 of the validated request body: same key + different body is rejected (D5).
-            $table->char('request_hash', 64);
-            $table->string('status'); // App\Enums\IdempotencyStatus
-            // The outcome of the first request. A retry rebuilds the same response from the
-            // subscription it points to (active -> 201, failed -> 402) instead of storing raw HTTP (D2).
+            $table->char('request_hash', 64); // SHA-256 of the request body
+            $table->string('status');
             $table->foreignId('subscription_id')->nullable()->constrained();
             $table->timestamps();
 
-            // The core of idempotency: the database, not PHP, guarantees that only one
-            // request per user and key can ever be claimed, even under concurrency (D3, D4).
+            // The core of idempotency: the database guarantees one claim per user and key,
+            // even under concurrency.
             $table->unique(['user_id', 'key']);
         });
     }

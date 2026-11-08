@@ -19,17 +19,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * The main use case: subscribe a member to a plan and pay the first invoice, exactly once
- * per Idempotency-Key. Knows nothing about HTTP; the controller and exception handler do that.
+ * Subscribe a member to a plan and pay the first invoice, exactly once per Idempotency-Key.
  *
- *   phase A  (transaction)  subscription pending + invoice open + key claimed   -> commit
- *   gateway  (no transaction) charge the invoice
- *   phase B  (transaction)  active + paid, or failed + void; key completed      -> commit
+ *   phase A  (transaction)     pending subscription + open invoice + key claimed
+ *   gateway  (no transaction)  charge the invoice
+ *   phase B  (transaction)     active + paid, or failed + void; key completed
  */
 final class SubscriptionService
 {
-    // Both injected by the container. PaymentGateway is an interface; which class we get
-    // is decided in AppServiceProvider (Strategy + dependency inversion).
     public function __construct(
         private readonly PaymentGateway $gateway,
         private readonly IdempotencyStore $idempotency,
@@ -45,8 +42,8 @@ final class SubscriptionService
         try {
             [$subscription, $claim] = $this->openSubscription($user, $plan, $idempotencyKey, $requestHash);
         } catch (UniqueConstraintViolationException) {
-            // The key is already claimed: a retry, or a concurrent duplicate that lost the race (D4).
-            // Nothing was written by this request (phase A rolled back) and nothing gets charged.
+            // Key already claimed: a retry, or a concurrent duplicate that lost the race.
+            // Phase A rolled back, so this request wrote nothing and charges nothing.
             return $this->replay($user, $idempotencyKey, $requestHash);
         }
 
@@ -56,22 +53,20 @@ final class SubscriptionService
     }
 
     /**
-     * Phase A. Committed BEFORE the gateway call, so no transaction (and no row locks)
-     * is held open while we wait on the network (D1).
+     * Phase A, committed before the gateway call so no transaction is held open
+     * while we wait on the network.
      *
      * @return array{Subscription, IdempotencyKey}
      */
     private function openSubscription(User $user, Plan $plan, string $idempotencyKey, string $requestHash): array
     {
-        // DB::transaction: BEGIN, run the closure, COMMIT; ROLLBACK and rethrow if it throws.
         return DB::transaction(function () use ($user, $plan, $idempotencyKey, $requestHash) {
             $subscription = $user->subscriptions()->create([
                 'plan_id' => $plan->id,
                 'status' => SubscriptionStatus::Pending,
             ]);
 
-            // Copy the price onto the invoice: a later plan price change must not
-            // change what this customer owes (D8).
+            // The price is copied, so a later plan price change doesn't change what this customer owes.
             $subscription->invoice()->create([
                 'amount_cents' => $plan->price_cents,
                 'currency' => $plan->currency,
@@ -79,7 +74,7 @@ final class SubscriptionService
             ]);
 
             // Last, so the claim can point at the subscription. If the key is taken,
-            // this throws and the two inserts above are rolled back with it.
+            // this throws and the two inserts above roll back with it.
             $claim = $this->idempotency->claim($user, $idempotencyKey, $requestHash, $subscription);
 
             return [$subscription, $claim];
@@ -87,10 +82,9 @@ final class SubscriptionService
     }
 
     /**
-     * The gateway call, outside any transaction (D1), then phase B records the outcome.
-     * Known gap: if the process dies between the charge and phase B, the key stays
-     * "processing" and the subscription "pending"; a webhook or reconciliation job would
-     * have to settle it (D6, README "Known limitations").
+     * Not handled: if the process dies between the charge and phase B, the key stays
+     * "processing" and the subscription "pending" until a webhook or reconciliation job
+     * settles it. See README "Known limitations".
      */
     private function payFirstInvoice(Subscription $subscription, IdempotencyKey $claim): void
     {
@@ -100,21 +94,19 @@ final class SubscriptionService
             $charge = $this->gateway->charge(
                 $invoice->amount_cents,
                 $invoice->currency,
-                // The provider gets one key per invoice: stable if we ever retry the charge,
-                // and unique across users (client keys are only unique per user) (D7).
+                // Not the client's key: that one is only unique per user, and would collide
+                // at the provider. One key per invoice is also stable for a later retry.
                 "invoice-{$invoice->id}",
             );
         } catch (PaymentFailedException $e) {
             $this->recordDecline($subscription, $invoice, $claim, $e);
 
-            // A decline is a normal business outcome, not a bug: warning, no stack trace.
-            // IDs and the reason code only; never the email or any card data.
             Log::channel('billing')->warning('payment.declined', [
                 ...$this->logContext($subscription, $invoice),
                 'reason' => $e->reason,
             ]);
 
-            throw $e; // the exception handler turns it into a 402
+            throw $e;
         }
 
         $this->recordPayment($subscription, $invoice, $claim, $charge);
@@ -125,19 +117,6 @@ final class SubscriptionService
         ]);
     }
 
-    /** The same identifying fields on every billing log line. */
-    private function logContext(Subscription $subscription, Invoice $invoice): array
-    {
-        return [
-            'user_id' => $subscription->user_id,
-            'subscription_id' => $subscription->id,
-            'invoice_id' => $invoice->id,
-            'amount_cents' => $invoice->amount_cents,
-            'currency' => $invoice->currency,
-        ];
-    }
-
-    /** Phase B, success. */
     private function recordPayment(Subscription $subscription, Invoice $invoice, IdempotencyKey $claim, ChargeResult $charge): void
     {
         DB::transaction(function () use ($subscription, $invoice, $claim, $charge) {
@@ -147,10 +126,7 @@ final class SubscriptionService
         });
     }
 
-    /**
-     * Phase B, decline. Stored as a final result: a retry with the same key gets the
-     * same 402 and is never charged again (D6).
-     */
+    /** A decline is final: a retry with the same key gets the same 402 and is never charged again. */
     private function recordDecline(Subscription $subscription, Invoice $invoice, IdempotencyKey $claim, PaymentFailedException $e): void
     {
         DB::transaction(function () use ($subscription, $invoice, $claim, $e) {
@@ -160,9 +136,7 @@ final class SubscriptionService
         });
     }
 
-    /**
-     * Same answer as the first request, rebuilt from what it stored. The gateway is not called.
-     */
+    /** Same answer as the first request, rebuilt from what it stored. The gateway is not called. */
     private function replay(User $user, string $idempotencyKey, string $requestHash): Subscription
     {
         $subscription = $this->idempotency->findReplayable($user, $idempotencyKey, $requestHash)->subscription;
@@ -178,5 +152,17 @@ final class SubscriptionService
         }
 
         return $subscription;
+    }
+
+    /** IDs and amounts only: never the email or any card data. */
+    private function logContext(Subscription $subscription, Invoice $invoice): array
+    {
+        return [
+            'user_id' => $subscription->user_id,
+            'subscription_id' => $subscription->id,
+            'invoice_id' => $invoice->id,
+            'amount_cents' => $invoice->amount_cents,
+            'currency' => $invoice->currency,
+        ];
     }
 }

@@ -11,23 +11,16 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
-// `role` is deliberately NOT fillable: User::create($request->all()) can never
-// turn a member into an admin through mass assignment (D9).
+// `role` is deliberately not fillable, so mass assignment can never create an admin.
 #[Fillable(['name', 'email', 'password'])]
-// Never serialized into JSON responses, even by accident.
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    // HasApiTokens (Sanctum): createToken() stores a SHA-256 hash of a random token
-    // in personal_access_tokens and returns the plain token to the client once (D10).
     use HasApiTokens, HasFactory;
 
-    /**
-     * Model-side default, matching the column default. Needed because after an INSERT
-     * Eloquent doesn't read DB defaults back, so without this a freshly created user
-     * would have role = null in memory until reloaded.
-     */
+    // Matches the column default. Eloquent doesn't read DB defaults back after an
+    // insert, so without this a new user has role = null until it is reloaded.
     protected $attributes = [
         'role' => 'member',
     ];
@@ -36,8 +29,6 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
-            // 'hashed' cast: assigning a plain password runs Hash::make() (bcrypt) on it
-            // before it is saved. An already-hashed value is left alone.
             'password' => 'hashed',
             'role' => UserRole::class,
         ];

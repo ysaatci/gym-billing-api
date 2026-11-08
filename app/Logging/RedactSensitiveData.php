@@ -6,24 +6,18 @@ use Illuminate\Log\Logger;
 use Monolog\LogRecord;
 
 /**
- * Safety net that scrubs secrets and personal data from log records before they are
- * written. Attached to log channels with 'tap' in config/logging.php.
- *
- * The first rule is still "don't pass it to the logger": we log user, subscription and
- * invoice IDs, never emails or card data. This catches mistakes, e.g. someone later
- * logging $request->all() or a whole model.
+ * Safety net that masks secrets and personal data before a log record is written.
+ * The real rule is still to log IDs and never pass personal data to the logger;
+ * this catches mistakes like someone later logging $request->all().
  */
 class RedactSensitiveData
 {
     public const MASK = '[REDACTED]';
 
-    /** Any context key whose name matches this is masked, at any depth. */
     private const SENSITIVE_KEY = '/pass(word)?|token|secret|authorization|cookie|api_?key|email|card|cvc|cvv|iban/i';
 
-    /** Email addresses inside the message text itself. */
     private const EMAIL = '/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i';
 
-    /** Called by Laravel when the channel is created. */
     public function __invoke(Logger $logger): void
     {
         $logger->pushProcessor(fn (LogRecord $record) => $this->redact($record));

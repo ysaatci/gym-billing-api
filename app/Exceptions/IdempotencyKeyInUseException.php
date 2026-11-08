@@ -4,10 +4,7 @@ namespace App\Exceptions;
 
 use RuntimeException;
 
-/**
- * The first request with this key hasn't finished yet. Rendered as 409 (bootstrap/app.php);
- * the client should retry the same request a bit later.
- */
+/** The first request with this key hasn't finished. Mapped to 409. */
 final class IdempotencyKeyInUseException extends RuntimeException
 {
     public function __construct()

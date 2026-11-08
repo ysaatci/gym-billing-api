@@ -12,18 +12,15 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Everything about Idempotency-Key rows, so SubscriptionService only orchestrates (D12).
- * The actual guarantee comes from the database: unique(user_id, key) on idempotency_keys.
+ * Idempotency-Key bookkeeping. The guarantee itself comes from the database:
+ * unique(user_id, key) on idempotency_keys.
  */
 final class IdempotencyStore
 {
     /**
-     * Claim the key for a new request. Must run inside the transaction that created
-     * $subscription: if the key is already taken this insert fails, and the whole
-     * transaction (subscription and invoice included) rolls back.
-     *
-     * Deliberately "insert and let the DB refuse" instead of "check, then insert":
-     * two concurrent requests could both pass a check, but only one insert can win (D4).
+     * Insert and let the database refuse duplicates, instead of "check, then insert":
+     * two concurrent requests could both pass a check, but only one insert can win.
+     * Runs inside the caller's transaction, so a refused claim rolls back everything with it.
      *
      * @throws UniqueConstraintViolationException when the key was already claimed
      */
@@ -39,17 +36,14 @@ final class IdempotencyStore
     }
 
     /**
-     * For a request whose key is already claimed: load the claim and check it can be replayed.
-     *
-     * @throws IdempotencyKeyMismatchException same key, different request body (422, D5)
-     * @throws IdempotencyKeyInUseException the first request is still running (409)
+     * @throws IdempotencyKeyMismatchException same key, different request body
+     * @throws IdempotencyKeyInUseException the first request is still running
      */
     public function findReplayable(User $user, string $key, string $requestHash): IdempotencyKey
     {
-        // select * from idempotency_keys where user_id = ? and key = ? limit 1
         $claim = IdempotencyKey::where('user_id', $user->id)->where('key', $key)->firstOrFail();
 
-        // The key itself is client-chosen text, so we log the row ID, not the key.
+        // We log the row ID, not the key: the key is client-chosen text.
         if ($claim->request_hash !== $requestHash) {
             Log::channel('billing')->warning('idempotency.key_mismatch', ['user_id' => $user->id, 'idempotency_key_id' => $claim->id]);
 

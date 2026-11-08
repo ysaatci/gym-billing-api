@@ -60,7 +60,6 @@ return [
             'ignore_exceptions' => false,
         ],
 
-        // Default channel (via 'stack'): framework messages and unhandled exceptions.
         'single' => [
             'driver' => 'single',
             'path' => storage_path('logs/laravel.log'),
@@ -69,8 +68,7 @@ return [
             'tap' => [RedactSensitiveData::class],
         ],
 
-        // Payment and subscription events, one JSON object per line so a log
-        // platform (ELK, Datadog, CloudWatch) can search by request_id or invoice_id.
+        // Payment events as JSON lines, searchable by request_id or invoice_id.
         'billing' => [
             'driver' => 'single',
             'path' => storage_path('logs/billing.log'),

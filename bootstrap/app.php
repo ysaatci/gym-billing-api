@@ -11,43 +11,32 @@ use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // API-only app, there is no login page: an unauthenticated request gets a 401,
-        // never a redirect. Without this, auth:sanctum tries to redirect to route('login')
-        // when the client doesn't send "Accept: application/json", and fails with a 500.
+        // API-only, no login page: guests get a 401, never a redirect (which would 500).
         $middleware->redirectGuestsTo(fn (Request $request) => null);
 
-        // First middleware for every request, so even a 401 or 404 has a request ID.
+        // First, so even a 401 or 404 has a request ID.
         $middleware->prepend(AssignRequestId::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        // API routes always get JSON errors (401, 403, 404, 422 ...) instead of HTML pages
-        // or redirects to a login page, even if the client forgot "Accept: application/json".
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
 
-        // Expected business outcomes, already logged by the service as one clean line.
-        // Without this, Laravel would also write each one to laravel.log with a full stack trace.
+        // Expected outcomes, already logged by the service as one line; keep them
+        // out of the error log. Everything else is logged with its stack trace, and the
+        // client gets a bare {"message": "Server Error"} (APP_DEBUG=false in production).
         $exceptions->dontReport([
             PaymentFailedException::class,
             IdempotencyKeyInUseException::class,
             IdempotencyKeyMismatchException::class,
         ]);
 
-        // Anything else (a bug, the DB down, a gateway breaking its contract) is reported
-        // to the default log channel WITH the stack trace and the request_id from Context.
-        // The client only ever gets {"message": "Server Error"} with status 500: with
-        // APP_DEBUG=false (required in production) Laravel leaves out the exception
-        // class, message, file and trace.
-
-        // Domain exceptions -> HTTP. The exceptions themselves know nothing about HTTP;
-        // this is the one place that maps them to status codes.
+        // The one place that maps domain exceptions to HTTP.
         $exceptions->render(fn (PaymentFailedException $e) => response()->json([
             'message' => $e->getMessage(),
             'reason' => $e->reason,

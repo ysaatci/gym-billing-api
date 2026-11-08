@@ -8,7 +8,7 @@ use App\Models\User;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Database\UniqueConstraintViolationException;
 
-function claimKey(User $user, string $key): IdempotencyKey
+function insertIdempotencyKey(User $user, string $key): IdempotencyKey
 {
     return IdempotencyKey::create([
         'user_id' => $user->id,
@@ -20,14 +20,14 @@ function claimKey(User $user, string $key): IdempotencyKey
 
 it('rejects a second claim of the same idempotency key for the same user', function () {
     $user = User::factory()->create();
-    claimKey($user, 'key-1');
+    insertIdempotencyKey($user, 'key-1');
 
-    claimKey($user, 'key-1');
+    insertIdempotencyKey($user, 'key-1');
 })->throws(UniqueConstraintViolationException::class);
 
 it('allows two different users to use the same idempotency key', function () {
-    claimKey(User::factory()->create(), 'key-1');
-    claimKey(User::factory()->create(), 'key-1');
+    insertIdempotencyKey(User::factory()->create(), 'key-1');
+    insertIdempotencyKey(User::factory()->create(), 'key-1');
 
     expect(IdempotencyKey::count())->toBe(2);
 });

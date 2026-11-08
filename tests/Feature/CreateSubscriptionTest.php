@@ -25,7 +25,7 @@ beforeEach(function () {
     $this->plan = Plan::factory()->create(['price_cents' => 2999, 'currency' => 'EUR']);
 });
 
-function subscribe(User $user, array $body, ?string $key = 'key-123')
+function postSubscription(User $user, array $body, ?string $key = 'key-123')
 {
     $headers = $key === null ? [] : ['Idempotency-Key' => $key];
 
@@ -35,7 +35,7 @@ function subscribe(User $user, array $body, ?string $key = 'key-123')
 it('creates an active subscription and a paid invoice', function () {
     $gateway = fakeGateway();
 
-    $response = subscribe($this->member, ['plan_id' => $this->plan->id]);
+    $response = postSubscription($this->member, ['plan_id' => $this->plan->id]);
 
     $response->assertCreated()
         ->assertJsonPath('data.status', 'active')
@@ -51,7 +51,7 @@ it('creates an active subscription and a paid invoice', function () {
         ->and($subscription->invoice->gateway_reference)->toStartWith('fake_ch_')
         ->and(IdempotencyKey::sole()->status)->toBe(IdempotencyStatus::Completed);
 
-    // Charged once, the invoice amount, with a per-invoice key for the provider (D7).
+    // Charged once, the invoice amount, with a per-invoice key for the provider.
     expect($gateway->charges)->toBe([[
         'amount_cents' => 2999,
         'currency' => 'EUR',
@@ -62,8 +62,8 @@ it('creates an active subscription and a paid invoice', function () {
 it('replays a retried request without charging again', function () {
     $gateway = fakeGateway();
 
-    $first = subscribe($this->member, ['plan_id' => $this->plan->id])->assertCreated();
-    $retry = subscribe($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    $first = postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    $retry = postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
 
     expect($retry->json())->toBe($first->json())
         ->and($gateway->charges)->toHaveCount(1)
@@ -75,9 +75,9 @@ it('rejects the same key with a different body (422) and charges nothing new', f
     $gateway = fakeGateway();
     $otherPlan = Plan::factory()->create(['name' => 'Premium', 'price_cents' => 4999]);
 
-    subscribe($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
 
-    subscribe($this->member, ['plan_id' => $otherPlan->id])
+    postSubscription($this->member, ['plan_id' => $otherPlan->id])
         ->assertUnprocessable()
         ->assertJsonPath('message', 'This Idempotency-Key was already used with a different request.');
 
@@ -101,7 +101,7 @@ it('answers 409 while the first request with the same key is still processing', 
         'subscription_id' => $inFlight->id,
     ]);
 
-    subscribe($this->member, ['plan_id' => $this->plan->id])->assertStatus(409);
+    postSubscription($this->member, ['plan_id' => $this->plan->id])->assertStatus(409);
 
     expect($gateway->charges)->toBeEmpty()
         ->and(Subscription::count())->toBe(1);
@@ -110,8 +110,8 @@ it('answers 409 while the first request with the same key is still processing', 
 it('lets two different users use the same key independently', function () {
     $gateway = fakeGateway();
 
-    subscribe($this->member, ['plan_id' => $this->plan->id])->assertCreated();
-    subscribe(User::factory()->create(), ['plan_id' => $this->plan->id])->assertCreated();
+    postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    postSubscription(User::factory()->create(), ['plan_id' => $this->plan->id])->assertCreated();
 
     expect($gateway->charges)->toHaveCount(2)
         ->and(Subscription::count())->toBe(2);
@@ -120,7 +120,7 @@ it('lets two different users use the same key independently', function () {
 it('records a declined payment and returns 402, also on retry', function () {
     $gateway = fakeGateway(decline: true);
 
-    subscribe($this->member, ['plan_id' => $this->plan->id])
+    postSubscription($this->member, ['plan_id' => $this->plan->id])
         ->assertStatus(402)
         ->assertExactJson(['message' => 'The payment was declined.', 'reason' => 'card_declined']);
 
@@ -129,8 +129,8 @@ it('records a declined payment and returns 402, also on retry', function () {
         ->and($subscription->invoice->status)->toBe(InvoiceStatus::Void)
         ->and($subscription->invoice->failure_reason)->toBe('card_declined');
 
-    // Retry with the same key: same answer, no second charge attempt (D6).
-    subscribe($this->member, ['plan_id' => $this->plan->id])
+    // Retry with the same key: same answer, no second charge attempt.
+    postSubscription($this->member, ['plan_id' => $this->plan->id])
         ->assertStatus(402)
         ->assertExactJson(['message' => 'The payment was declined.', 'reason' => 'card_declined']);
 
@@ -139,7 +139,7 @@ it('records a declined payment and returns 402, also on retry', function () {
 
 it('keeps the invoice amount when the plan price changes later', function () {
     fakeGateway();
-    subscribe($this->member, ['plan_id' => $this->plan->id])->assertCreated();
+    postSubscription($this->member, ['plan_id' => $this->plan->id])->assertCreated();
 
     $this->plan->update(['price_cents' => 3999]);
 
@@ -151,7 +151,7 @@ it('validates the request before anything is written or charged', function (arra
     $inactive = Plan::factory()->inactive()->create();
     $body = array_map(fn ($v) => $v === 'INACTIVE' ? $inactive->id : $v, $body);
 
-    subscribe($this->member, $body, $key)
+    postSubscription($this->member, $body, $key)
         ->assertUnprocessable()
         ->assertJsonValidationErrors([$field]);
 

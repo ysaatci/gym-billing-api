@@ -25,11 +25,8 @@ class Subscription extends Model
         ];
     }
 
-    /**
-     * Status changes go through these methods only, so an invalid transition
-     * (e.g. failed -> active) is a loud error instead of silently corrupt billing data.
-     * An enum plus two guarded methods is enough for three states (no State pattern).
-     */
+    // Status only changes through these methods, so an invalid transition
+    // (e.g. failed -> active) fails loudly instead of writing bad billing data.
     public function markActive(): void
     {
         $this->assertPending();
@@ -62,8 +59,7 @@ class Subscription extends Model
     }
 
     /**
-     * One invoice per subscription for now: the first payment.
-     * Recurring renewals would make this a HasMany (see README "Known limitations").
+     * Only the first payment for now. Renewals would make this a HasMany.
      *
      * @return HasOne<Invoice, $this>
      */
