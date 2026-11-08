@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -48,6 +49,10 @@ class AuthController extends Controller
         // (slow) hash check, so response timing still differs. No rate limiting either
         // (see README "Known limitations").
         if (! $user || ! Hash::check($request->validated('password'), $user->password)) {
+            // Never log the email or the password that was tried. The user ID (when the
+            // account exists) and the request ID are enough to spot a brute-force attempt.
+            Log::warning('auth.login_failed', ['user_id' => $user?->id]);
+
             throw new AuthenticationException('Invalid credentials.'); // rendered as 401 JSON
         }
 

@@ -2,6 +2,7 @@
 
 use App\Exceptions\IdempotencyKeyInUseException;
 use App\Exceptions\IdempotencyKeyMismatchException;
+use App\Http\Middleware\AssignRequestId;
 use App\Payments\PaymentFailedException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -20,6 +21,9 @@ return Application::configure(basePath: dirname(__DIR__))
         // never a redirect. Without this, auth:sanctum tries to redirect to route('login')
         // when the client doesn't send "Accept: application/json", and fails with a 500.
         $middleware->redirectGuestsTo(fn (Request $request) => null);
+
+        // First middleware for every request, so even a 401 or 404 has a request ID.
+        $middleware->prepend(AssignRequestId::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // API routes always get JSON errors (401, 403, 404, 422 ...) instead of HTML pages
@@ -27,6 +31,20 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        // Expected business outcomes, already logged by the service as one clean line.
+        // Without this, Laravel would also write each one to laravel.log with a full stack trace.
+        $exceptions->dontReport([
+            PaymentFailedException::class,
+            IdempotencyKeyInUseException::class,
+            IdempotencyKeyMismatchException::class,
+        ]);
+
+        // Anything else (a bug, the DB down, a gateway breaking its contract) is reported
+        // to the default log channel WITH the stack trace and the request_id from Context.
+        // The client only ever gets {"message": "Server Error"} with status 500: with
+        // APP_DEBUG=false (required in production) Laravel leaves out the exception
+        // class, message, file and trace.
 
         // Domain exceptions -> HTTP. The exceptions themselves know nothing about HTTP;
         // this is the one place that maps them to status codes.

@@ -16,6 +16,7 @@ use App\Payments\PaymentFailedException;
 use App\Payments\PaymentGateway;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * The main use case: subscribe a member to a plan and pay the first invoice, exactly once
@@ -106,10 +107,34 @@ final class SubscriptionService
         } catch (PaymentFailedException $e) {
             $this->recordDecline($subscription, $invoice, $claim, $e);
 
+            // A decline is a normal business outcome, not a bug: warning, no stack trace.
+            // IDs and the reason code only; never the email or any card data.
+            Log::channel('billing')->warning('payment.declined', [
+                ...$this->logContext($subscription, $invoice),
+                'reason' => $e->reason,
+            ]);
+
             throw $e; // the exception handler turns it into a 402
         }
 
         $this->recordPayment($subscription, $invoice, $claim, $charge);
+
+        Log::channel('billing')->info('payment.succeeded', [
+            ...$this->logContext($subscription, $invoice),
+            'gateway_reference' => $charge->reference,
+        ]);
+    }
+
+    /** The same identifying fields on every billing log line. */
+    private function logContext(Subscription $subscription, Invoice $invoice): array
+    {
+        return [
+            'user_id' => $subscription->user_id,
+            'subscription_id' => $subscription->id,
+            'invoice_id' => $invoice->id,
+            'amount_cents' => $invoice->amount_cents,
+            'currency' => $invoice->currency,
+        ];
     }
 
     /** Phase B, success. */
@@ -141,6 +166,12 @@ final class SubscriptionService
     private function replay(User $user, string $idempotencyKey, string $requestHash): Subscription
     {
         $subscription = $this->idempotency->findReplayable($user, $idempotencyKey, $requestHash)->subscription;
+
+        Log::channel('billing')->info('idempotency.replayed', [
+            'user_id' => $user->id,
+            'subscription_id' => $subscription->id,
+            'status' => $subscription->status->value,
+        ]);
 
         if ($subscription->status === SubscriptionStatus::Failed) {
             throw new PaymentFailedException($subscription->invoice->failure_reason);

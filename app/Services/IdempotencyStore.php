@@ -9,6 +9,7 @@ use App\Models\IdempotencyKey;
 use App\Models\Subscription;
 use App\Models\User;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Everything about Idempotency-Key rows, so SubscriptionService only orchestrates (D12).
@@ -48,11 +49,16 @@ final class IdempotencyStore
         // select * from idempotency_keys where user_id = ? and key = ? limit 1
         $claim = IdempotencyKey::where('user_id', $user->id)->where('key', $key)->firstOrFail();
 
+        // The key itself is client-chosen text, so we log the row ID, not the key.
         if ($claim->request_hash !== $requestHash) {
+            Log::channel('billing')->warning('idempotency.key_mismatch', ['user_id' => $user->id, 'idempotency_key_id' => $claim->id]);
+
             throw new IdempotencyKeyMismatchException;
         }
 
         if ($claim->status === IdempotencyStatus::Processing) {
+            Log::channel('billing')->warning('idempotency.key_in_use', ['user_id' => $user->id, 'idempotency_key_id' => $claim->id]);
+
             throw new IdempotencyKeyInUseException;
         }
 

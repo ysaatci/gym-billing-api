@@ -92,7 +92,9 @@ Rejected: `Cache::lock` (needs Redis, and the lock isn't atomic with the DB writ
 
 **D12. Idempotency logic lives in a small `IdempotencyStore` class injected into `SubscriptionService`, not in generic middleware.** The store does three things: `claim()`, `findReplay()`, `complete()`. The service only orchestrates (SRP), and the flow is still readable top to bottom in the service. Cost: one more file. When a second endpoint needs idempotency, wrap the store in middleware.
 
-**D13. Logging: dedicated `billing` channel, request ID via `Log::withContext()`, Monolog processor that redacts `password`, `token`, `authorization`, `email`, `card*`.** Log user/subscription/invoice IDs, never emails or card data. Redaction is a safety net; the first rule is to not pass personal data to the logger at all.
+**D13. Logging: dedicated `billing` channel (JSON lines), request ID via Laravel's `Context`, Monolog processor (`RedactSensitiveData`, attached with `tap`) that masks sensitive keys (`password`, `token`, `authorization`, `email`, `card*`, ...) at any depth and email addresses in text.** Log user/subscription/invoice IDs, never emails, card data or the client's idempotency key. Redaction is a safety net; the first rule is to not pass personal data to the logger at all.
+Why `Context` and not `Log::withContext()`: Context is added to every channel, and it is carried into queued jobs, which matters once the gateway call moves to a queue.
+Expected outcomes (decline, 409, 422) are logged once by the service and excluded from exception reporting (`dontReport`), so the error log only holds real errors with stack traces.
 
 **D14. Replays return the same status code and body as the first request, with no marker.** Clients don't need to tell the cases apart. An `Idempotent-Replayed: true` header would help debugging; left out to keep the service free of HTTP concerns (listed under "what I'd change").
 
@@ -125,7 +127,7 @@ SOLID in this codebase:
 
 ## Review checklist -> where it lives
 1. **Error handling:** try/catch around the gateway call in the service, custom `PaymentFailedException`, exception handler in `bootstrap/app.php` returns clean JSON with no stack trace (`APP_DEBUG=false`).
-2. **Error logging:** `billing` channel, request ID in every entry, redaction processor (D13).
+2. **Error logging:** `AssignRequestId` middleware (request ID in every entry and in the `X-Request-Id` header), `billing` channel in `config/logging.php`, `RedactSensitiveData` processor, log calls in `SubscriptionService` / `IdempotencyStore` / `AuthController::login` (D13).
 3. **Clean code:** clear names, small methods, useful comments. "What I'd clean up" list in README.
 4. **DB credentials:** from `.env` via `config/database.php`. `.env` gitignored, `.env.example` committed. In production, secrets come from a secrets store (Vault / AWS Secrets Manager) injected as env vars at deploy, with rotation.
 5. **Login and permissions:** `Hash::make` and `Hash::check`, Sanctum token auth on each request, `SubscriptionPolicy::view` for owner-or-admin.
