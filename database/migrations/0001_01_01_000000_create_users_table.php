@@ -16,7 +16,10 @@ return new class extends Migration
             $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
-            $table->string('password');
+            $table->string('password'); // bcrypt hash, never the plain password
+            // Stored as a string, cast to App\Enums\UserRole in the model.
+            // New users are always members; admins are created by the seeder only (D9).
+            $table->string('role')->default('member');
             $table->rememberToken();
             $table->timestamps();
         });
