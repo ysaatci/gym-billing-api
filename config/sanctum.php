@@ -84,4 +84,7 @@ return [
         'validate_csrf_token' => ValidateCsrfToken::class,
     ],
 
+    // Token auth only: don't register the SPA cookie endpoint (sanctum/csrf-cookie).
+    'routes' => false,
+
 ];

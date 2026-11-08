@@ -18,7 +18,7 @@ it('masks sensitive keys at any depth and keeps IDs', function () {
             'card_number' => '4242424242424242',
             'headers' => ['Authorization' => 'Bearer 1|abc'],
         ],
-        'api_key' => 'sk_live_123',
+        'api_key' => 'not-a-real-key',
     ]));
 
     expect($redacted->context)->toBe([

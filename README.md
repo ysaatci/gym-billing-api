@@ -19,5 +19,3 @@ composer setup     # install, .env, SQLite, migrate + seed (member@example.com /
 composer dev       # http://localhost:8000
 vendor/bin/pest    # 37 tests
 ```
-
-Built as a timeboxed exercise with AI assistance (Claude Code), in small reviewed steps. I've read and can explain every line.
